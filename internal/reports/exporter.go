@@ -306,7 +306,8 @@ func (e *reportExporter) exportApprovalStatusCSV(rows []ApprovalStatusReportRow)
     var buf bytes.Buffer
     writer := csv.NewWriter(&buf)
 
-    headers := []string{"Name", "Tenant ID", "Role", "Status", "Created At", "Email"}
+    // Add "Approval Type" to headers
+    headers := []string{"Name", "Tenant ID", "Approval Type", "Role", "Status", "Created At", "Email"}
     if err := writer.Write(headers); err != nil {
         return nil, err
     }
@@ -315,6 +316,7 @@ func (e *reportExporter) exportApprovalStatusCSV(rows []ApprovalStatusReportRow)
         record := []string{
             row.Name,
             row.TenantID,
+            row.ApprovalType, // Added this field
             row.Role,
             row.Status,
             row.CreatedAt.Format("2006-01-02 15:04:05"),
@@ -338,7 +340,8 @@ func (e *reportExporter) exportApprovalStatusExcel(rows []ApprovalStatusReportRo
     sheetName := "Approval Status"
     f.SetSheetName("Sheet1", sheetName)
 
-    headers := []string{"Name", "Tenant ID", "Role", "Status", "Created At", "Email"}
+    // Add "Approval Type" to headers
+    headers := []string{"Name", "Tenant ID", "Approval Type", "Role", "Status", "Created At", "Email"}
     for i, header := range headers {
         cell := fmt.Sprintf("%c1", 'A'+i)
         f.SetCellValue(sheetName, cell, header)
@@ -348,10 +351,11 @@ func (e *reportExporter) exportApprovalStatusExcel(rows []ApprovalStatusReportRo
         rowNum := i + 2
         f.SetCellValue(sheetName, fmt.Sprintf("A%d", rowNum), row.Name)
         f.SetCellValue(sheetName, fmt.Sprintf("B%d", rowNum), row.TenantID)
-        f.SetCellValue(sheetName, fmt.Sprintf("C%d", rowNum), row.Role)
-        f.SetCellValue(sheetName, fmt.Sprintf("D%d", rowNum), row.Status)
-        f.SetCellValue(sheetName, fmt.Sprintf("E%d", rowNum), row.CreatedAt.Format("2006-01-02 15:04:05"))
-        f.SetCellValue(sheetName, fmt.Sprintf("F%d", rowNum), row.Email)
+        f.SetCellValue(sheetName, fmt.Sprintf("C%d", rowNum), row.ApprovalType) // Added this field
+        f.SetCellValue(sheetName, fmt.Sprintf("D%d", rowNum), row.Role)
+        f.SetCellValue(sheetName, fmt.Sprintf("E%d", rowNum), row.Status)
+        f.SetCellValue(sheetName, fmt.Sprintf("F%d", rowNum), row.CreatedAt.Format("2006-01-02 15:04:05"))
+        f.SetCellValue(sheetName, fmt.Sprintf("G%d", rowNum), row.Email)
     }
 
     var buf bytes.Buffer
@@ -369,8 +373,9 @@ func (e *reportExporter) exportApprovalStatusPDF(rows []ApprovalStatusReportRow)
     pdf.Ln(20)
 
     pdf.SetFont("Arial", "B", 10)
-    widths := []float64{40, 25, 30, 25, 35, 50}
-    headers := []string{"Name", "Tenant ID", "Role", "Status", "Created At", "Email"}
+    // Add "Approval Type" column with appropriate width
+    widths := []float64{35, 25, 25, 25, 25, 35, 45}
+    headers := []string{"Name", "Tenant ID", "Approval Type", "Role", "Status", "Created At", "Email"}
 
     for i, h := range headers {
         pdf.CellFormat(widths[i], 7, h, "1", 0, "C", false, 0, "")
@@ -382,6 +387,7 @@ func (e *reportExporter) exportApprovalStatusPDF(rows []ApprovalStatusReportRow)
         values := []string{
             row.Name,
             row.TenantID,
+            row.ApprovalType, // Added this field
             row.Role,
             row.Status,
             row.CreatedAt.Format("2006-01-02 15:04:05"),

@@ -2197,130 +2197,139 @@ func (h *Handler) GetSuperAdminTenantAuditLogsReport(c *gin.Context) {
 // ==============================
 // Approval Status Report Handler
 // ==============================
+// GetApprovalStatusReport handles requests for approval status reports
 func (h *Handler) GetApprovalStatusReport(c *gin.Context) {
-	// Access context from middleware
-	accessContext, exists := c.Get("access_context")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "access context missing"})
-		return
-	}
-	ctx := accessContext.(middleware.AccessContext)
-	ip := middleware.GetIPFromContext(c)
+    // Access context from middleware
+    accessContext, exists := c.Get("access_context")
+    if !exists {
+        c.JSON(http.StatusUnauthorized, gin.H{"error": "access context missing"})
+        return
+    }
+    ctx := accessContext.(middleware.AccessContext)
+    ip := middleware.GetIPFromContext(c)
 
-	// Query params
-	role := c.Query("role")       // "tenant" or "temple"
-	status := c.Query("status")
-	dateRange := c.Query("date_range")
-	if dateRange == "" {
-		dateRange = DateRangeWeekly
-	}
-	startDateStr := c.Query("start_date")
-	endDateStr := c.Query("end_date")
-	format := c.Query("format") // excel, csv, pdf -> empty = JSON
+    // Query params
+    role := c.Query("role")       // "Tenant" or "Temple"
+    status := c.Query("status")   // "approved", "rejected", "pending", etc.
+    dateRange := c.Query("date_range")
+    if dateRange == "" {
+        dateRange = DateRangeWeekly
+    }
+    startDateStr := c.Query("start_date")
+    endDateStr := c.Query("end_date")
+    format := c.Query("format")   // excel, csv, pdf -> empty = JSON
 
-	// Compute start & end
-	start, end, err := GetDateRange(dateRange, startDateStr, endDateStr)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
+    // Debug log
+    fmt.Printf("Processing approval status report: role=%s, status=%s, format=%s\n", role, status, format)
 
-	req := ApprovalStatusReportRequest{
-		Role:      role,
-		Status:    status,
-		DateRange: dateRange,
-		StartDate: start,
-		EndDate:   end,
-		Format:    format,
-		UserID:    ctx.UserID,
-	}
+    // Compute start & end dates
+    start, end, err := GetDateRange(dateRange, startDateStr, endDateStr)
+    if err != nil {
+        c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+        return
+    }
 
-	// Determine accessible entities based on role
-	var entityIDs []string
-	switch ctx.RoleName {
-	case "superadmin":
-		// Superadmin can access all entities
-		entityIDs = nil
-	case "tenantadmin":
-		accessibleEntityID := ctx.GetAccessibleEntityID()
-		if accessibleEntityID == nil {
-			c.JSON(http.StatusForbidden, gin.H{"error": "no accessible tenant entity"})
-			return
-		}
-		entityIDs = append(entityIDs, fmt.Sprint(*accessibleEntityID))
-	case "templeadmin":
-		ids, err := h.repo.GetEntitiesByTenant(ctx.UserID)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch temple entities"})
-			return
-		}
-		for _, id := range ids {
-			entityIDs = append(entityIDs, fmt.Sprint(id))
-		}
-	default:
-		c.JSON(http.StatusForbidden, gin.H{"error": "role not allowed for approval reports"})
-		return
-	}
+    // Create request object
+    req := ApprovalStatusReportRequest{
+        Role:      role,
+        Status:    status,
+        DateRange: dateRange,
+        StartDate: start,
+        EndDate:   end,
+        Format:    format,
+        UserID:    ctx.UserID,
+    }
 
-	// Return JSON preview if format not specified
-	if req.Format == "" {
-		data, err := h.service.GetApprovalStatusReport(req, entityIDs)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-		h.auditSvc.LogAction(
-			c.Request.Context(),
-			&ctx.UserID,
-			nil,
-			"APPROVAL_STATUS_REPORT_VIEWED",
-			map[string]interface{}{
-				"report_type": "approval_status",
-				"entity_ids":  entityIDs,
-				"role":        role,
-				"status":      status,
-				"date_range":  req.DateRange,
-			},
-			ip,
-			"success",
-		)
-		c.JSON(http.StatusOK, gin.H{
-			"report_type": "approval-status",
-			"data":        data,
-		})
-		return
-	}
+    // Determine accessible entities based on role
+    var entityIDs []string
+    switch ctx.RoleName {
+    case "superadmin":
+        // Superadmin can access all entities (pass empty slice for all)
+        // Keep entityIDs as empty slice
+    case "tenantadmin":
+        accessibleEntityID := ctx.GetAccessibleEntityID()
+        if accessibleEntityID == nil {
+            c.JSON(http.StatusForbidden, gin.H{"error": "no accessible tenant entity"})
+            return
+        }
+        entityIDs = append(entityIDs, fmt.Sprint(*accessibleEntityID))
+    case "templeadmin":
+        ids, err := h.repo.GetEntitiesByTenant(ctx.UserID)
+        if err != nil {
+            c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch temple entities"})
+            return
+        }
+        for _, id := range ids {
+            entityIDs = append(entityIDs, fmt.Sprint(id))
+        }
+    default:
+        c.JSON(http.StatusForbidden, gin.H{"error": "role not allowed for approval reports"})
+        return
+    }
 
-	// Map format to appropriate report type
-	var reportType string
-	switch format {
-	case "excel":
-		reportType = ReportTypeApprovalStatusExcel
-	case "pdf":
-		reportType = ReportTypeApprovalStatusPDF
-	case "csv":
-		reportType = ReportTypeApprovalStatusCSV
-	default:
-		c.JSON(http.StatusBadRequest, gin.H{"error": "unsupported format"})
-		return
-	}
+    // Return JSON preview if format not specified
+    if req.Format == "" {
+        data, err := h.service.GetApprovalStatusReport(req, entityIDs)
+        if err != nil {
+            c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+            return
+        }
+        
+        // Log the view action
+        h.auditSvc.LogAction(
+            c.Request.Context(),
+            &ctx.UserID,
+            nil,
+            "APPROVAL_STATUS_REPORT_VIEWED",
+            map[string]interface{}{
+                "report_type": "approval_status",
+                "entity_ids":  entityIDs,
+                "role":        role,
+                "status":      status,
+                "date_range":  req.DateRange,
+                "row_count":   len(data),
+            },
+            ip,
+            "success",
+        )
+        
+        c.JSON(http.StatusOK, gin.H{
+            "report_type": "approval-status",
+            "data":        data,
+        })
+        return
+    }
 
-	// Export report if format is specified
-	bytes, fname, mime, err := h.service.ExportApprovalStatusReport(
-		c.Request.Context(),
-		req,
-		entityIDs,
-		reportType,
-		&ctx.UserID,
-		ip,
-	)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
+    // Map format to appropriate report type
+    var reportType string
+    switch format {
+    case "excel":
+        reportType = ReportTypeApprovalStatusExcel
+    case "pdf":
+        reportType = ReportTypeApprovalStatusPDF
+    case "csv":
+        reportType = ReportTypeApprovalStatusCSV
+    default:
+        c.JSON(http.StatusBadRequest, gin.H{"error": "unsupported format"})
+        return
+    }
 
-	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%s", fname))
-	c.Data(http.StatusOK, mime, bytes)
+    // Export report if format is specified
+    bytes, fname, mime, err := h.service.ExportApprovalStatusReport(
+        c.Request.Context(),
+        req,
+        entityIDs,
+        reportType,
+        &ctx.UserID,
+        ip,
+    )
+    if err != nil {
+        c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+        return
+    }
+
+    c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%s", fname))
+    c.Data(http.StatusOK, mime, bytes)
 }
 
 

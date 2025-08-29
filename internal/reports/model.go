@@ -282,13 +282,13 @@ type ApprovalStatusReportRequest struct {
 // ApprovalStatusReportRow represents a detailed approval status row
 // Update in reports/model.go if needed
 type ApprovalStatusReportRow struct {
-    Name       string    `json:"name"`
-    TenantID   string    `json:"tenant_id"` 
-    ApprovalType string  `json:"approval_type"` // Add this field to distinguish: "tenant" or "temple"
-    Role       string    `json:"role"`
-    Status     string    `json:"status"`
-    CreatedAt  time.Time `json:"created_at"`
-    Email      string    `json:"email"`
+    Name         string    `json:"name"`
+    TenantID     string    `json:"tenant_id"` 
+    ApprovalType string    `json:"approval_type"`
+    Role         string    `json:"role"`
+    Status       string    `json:"status"`
+    CreatedAt    time.Time `json:"created_at"`
+    Email        string    `json:"email"`
 }
 
 type UserDetailsReportRow = UserDetailReportRow

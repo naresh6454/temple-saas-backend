@@ -2,7 +2,8 @@ package reports
 
 import (
 	"time"
-
+	"fmt"
+	"strings"
 	"gorm.io/gorm"
 )
 
@@ -301,50 +302,82 @@ func (r *repository) GetAuditLogs(entityIDs []uint, start, end time.Time, action
 	return rows, err
 }
 // GetApprovalStatus fetches approval status records for reporting
+// GetApprovalStatus fetches approval status records for reporting
+// GetApprovalStatus fetches approval status records for reporting
+// GetApprovalStatus fetches approval status records for reporting
 func (r *repository) GetApprovalStatus(entityIDs []uint, start, end time.Time, role, status string) ([]ApprovalStatusReportRow, error) {
-	var rows []ApprovalStatusReportRow
+    var rows []ApprovalStatusReportRow
 
-	query := r.db.Table("users u").
-		Select(`
+    // Debug input parameters
+    fmt.Printf("GetApprovalStatus called with: entityIDs=%v, start=%v, end=%v, role=%s, status=%s\n", 
+        entityIDs, start, end, role, status)
+
+    // Build query from approval_requests table
+    query := r.db.Table("approval_requests ar").
+        Select(`
             u.full_name as name,
-            COALESCE(CAST(uem.entity_id AS CHAR), 'N/A') as id,  -- tenant_id replaced as id
-            ur.role_name as role,
-            uem.status,          -- real status from DB
-            u.created_at,
+            COALESCE(CAST(ar.entity_id AS CHAR), 'N/A') as tenant_id,
+            ar.request_type as approval_type,
+            CASE 
+                WHEN ar.request_type = 'tenant_approval' THEN 'Tenant'
+                WHEN ar.request_type = 'temple_approval' THEN 'Temple'
+                ELSE 'Unknown'
+            END as role,
+            ar.status,
+            ar.created_at,
             u.email
         `).
-		Joins("LEFT JOIN user_entity_memberships uem ON u.id = uem.user_id").
-		Joins("LEFT JOIN user_roles ur ON u.role_id = ur.id")
+        Joins("LEFT JOIN users u ON ar.user_id = u.id")
 
-	// Filter by entity only if provided
-	if len(entityIDs) > 0 {
-		query = query.Where("uem.entity_id IN ?", entityIDs)
-	}
+    // Filter by entity IDs if provided
+    if len(entityIDs) > 0 {
+        query = query.Where("ar.entity_id IN ? OR (ar.request_type = 'tenant_approval' AND ar.entity_id IS NULL)", entityIDs)
+        fmt.Printf("Applied entity filter: %v\n", entityIDs)
+    }
 
-	if !start.IsZero() && !end.IsZero() {
-		query = query.Where("u.created_at BETWEEN ? AND ?", start, end)
-	}
+    // Apply date range filter
+    if !start.IsZero() && !end.IsZero() {
+        query = query.Where("ar.created_at BETWEEN ? AND ?", start, end)
+        fmt.Printf("Applied date range filter: %v to %v\n", start, end)
+    }
 
-	if role != "" {
-		query = query.Where("ur.role_name = ?", role)
-	}
+    // Filter by role if specified (tenant or temple)
+    if role != "" {
+        roleFilter := ""
+        if strings.ToLower(role) == "tenant" {
+            roleFilter = "tenant_approval"
+        } else if strings.ToLower(role) == "temple" {
+            roleFilter = "temple_approval"
+        }
+        
+        if roleFilter != "" {
+            query = query.Where("ar.request_type = ?", roleFilter)
+            fmt.Printf("Applied role filter: %s -> %s\n", role, roleFilter)
+        }
+    }
 
-	if status != "" {
-		query = query.Where("uem.status = ?", status)
-	}
+    // Filter by status if specified
+    if status != "" {
+        query = query.Where("ar.status = ?", status)
+        fmt.Printf("Applied status filter: %s\n", status)
+    }
 
-	err := query.Order("u.created_at DESC").Scan(&rows).Error
+    // Log the final SQL query
+    fmt.Printf("Final SQL query: %v\n", query.Statement.SQL.String())
 
-	// Replace null/empty status with "N/A" for users without membership
-	for i := range rows {
-		if rows[i].Status == "" {
-			rows[i].Status = "N/A"
-		}
-	}
+    // Execute the query
+    err := query.Order("ar.created_at DESC").Scan(&rows).Error
+    
+    // Debug the results
+    fmt.Printf("Query returned %d rows with error: %v\n", len(rows), err)
+    if len(rows) > 0 {
+        fmt.Printf("First row: %+v\n", rows[0])
+    } else {
+        fmt.Printf("No rows returned, check the query and filters\n")
+    }
 
-	return rows, err
+    return rows, err
 }
-
 
 // GetUserDetails fetches user detail records for reporting
 func (r *repository) GetUserDetails(entityIDs []uint, start, end time.Time, role, status string) ([]UserDetailsReportRow, error) {

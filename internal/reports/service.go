@@ -373,52 +373,81 @@ func (s *reportService) ExportAuditLogsReport(ctx context.Context, req AuditLogR
 // Approval Status Reports
 // ===============================
 
+// GetApprovalStatusReport retrieves approval status data based on filters
 func (s *reportService) GetApprovalStatusReport(req ApprovalStatusReportRequest, entityIDs []string) ([]ApprovalStatusReportRow, error) {
     // Convert string IDs to uint
     ids := convertUintSlice(entityIDs)
     
-    // Call repository with filters
-    return s.repo.GetApprovalStatus(ids, req.StartDate, req.EndDate, req.Role, req.Status)
+    // Validate role if specified - ensure only Tenant or Temple roles are allowed
+    if req.Role != "" && req.Role != "Tenant" && req.Role != "Temple" {
+        // Return empty result for invalid roles instead of error
+        return []ApprovalStatusReportRow{}, nil
+    }
+
+    // Get approval status data from repository
+    rows, err := s.repo.GetApprovalStatus(ids, req.StartDate, req.EndDate, req.Role, req.Status)
+    if err != nil {
+        return nil, fmt.Errorf("failed to get approval status data: %w", err)
+    }
+
+    // Log the count of rows for debugging
+    fmt.Printf("Retrieved %d approval status rows\n", len(rows))
+    
+    return rows, nil
 }
 
+// ExportApprovalStatusReport exports approval status data in the requested format
 func (s *reportService) ExportApprovalStatusReport(ctx context.Context, req ApprovalStatusReportRequest, entityIDs []string, reportType string, userID *uint, ip string) ([]byte, string, string, error) {
-	rows, err := s.GetApprovalStatusReport(req, entityIDs)
-	if err != nil {
-		s.auditSvc.LogAction(ctx, userID, nil, "APPROVAL_STATUS_REPORT_DOWNLOAD_FAILED", map[string]interface{}{
-			"report_type": "approval_status",
-			"format":      req.Format,
-			"error":       err.Error(),
-			"role":        req.Role,
-			"status":      req.Status,
-		}, ip, "failure")
-		return nil, "", "", err
-	}
+    // Get the approval status data
+    rows, err := s.GetApprovalStatusReport(req, entityIDs)
+    if err != nil {
+        details := map[string]interface{}{
+            "report_type": "approval_status",
+            "format":      req.Format,
+            "error":       err.Error(),
+            "role":        req.Role,
+            "status":      req.Status,
+        }
+        s.auditSvc.LogAction(ctx, userID, nil, "APPROVAL_STATUS_REPORT_DOWNLOAD_FAILED", details, ip, "failure")
+        return nil, "", "", err
+    }
 
-	data := ReportData{ApprovalStatus: rows}
-	bytes, filename, mimeType, err := s.exporter.Export(reportType, req.Format, data)
-	if err != nil {
-		s.auditSvc.LogAction(ctx, userID, nil, "APPROVAL_STATUS_REPORT_DOWNLOAD_FAILED", map[string]interface{}{
-			"report_type": "approval_status",
-			"format":      req.Format,
-			"error":       err.Error(),
-			"role":        req.Role,
-			"status":      req.Status,
-		}, ip, "failure")
-		return nil, "", "", err
-	}
+    // If no rows were found, log that information but continue with export
+    if len(rows) == 0 {
+        fmt.Println("No approval status rows found matching the filters")
+    }
 
-	s.auditSvc.LogAction(ctx, userID, nil, "APPROVAL_STATUS_REPORT_DOWNLOADED", map[string]interface{}{
-		"report_type":  "approval_status",
-		"format":       req.Format,
-		"filename":     filename,
-		"entity_ids":   entityIDs,
-		"role":         req.Role,
-		"status":       req.Status,
-		"date_range":   req.DateRange,
-		"record_count": len(rows),
-	}, ip, "success")
+    // Prepare data for export
+    data := ReportData{ApprovalStatus: rows}
+    
+    // Export using the appropriate format
+    bytes, filename, mimeType, err := s.exporter.Export(reportType, req.Format, data)
+    if err != nil {
+        details := map[string]interface{}{
+            "report_type": "approval_status",
+            "format":      req.Format,
+            "error":       err.Error(),
+            "role":        req.Role,
+            "status":      req.Status,
+        }
+        s.auditSvc.LogAction(ctx, userID, nil, "APPROVAL_STATUS_REPORT_DOWNLOAD_FAILED", details, ip, "failure")
+        return nil, "", "", err
+    }
 
-	return bytes, filename, mimeType, nil
+    // Log successful export
+    details := map[string]interface{}{
+        "report_type":  "approval_status",
+        "format":       req.Format,
+        "filename":     filename,
+        "entity_ids":   entityIDs,
+        "role":         req.Role,
+        "status":       req.Status,
+        "date_range":   req.DateRange,
+        "record_count": len(rows),
+    }
+    s.auditSvc.LogAction(ctx, userID, nil, "APPROVAL_STATUS_REPORT_DOWNLOADED", details, ip, "success")
+
+    return bytes, filename, mimeType, nil
 }
 
 // ===============================
