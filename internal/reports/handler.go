@@ -2336,6 +2336,8 @@ func (h *Handler) GetApprovalStatusReport(c *gin.Context) {
 // ==============================
 // User Details Report Handler
 // ==============================
+// GetUserDetailsReport handles requests for user details report
+// GetUserDetailsReport handles requests for user details report
 func (h *Handler) GetUserDetailsReport(c *gin.Context) {
 	// Access context
 	accessContext, exists := c.Get("access_context")
@@ -2418,7 +2420,21 @@ func (h *Handler) GetUserDetailsReport(c *gin.Context) {
 	}
 
 	// Export report
-	bytes, fname, mime, err := h.service.ExportUserDetailsReport(c.Request.Context(), req, entityIDs, req.Format, &ctx.UserID, ip)
+	// Determine report type based on format
+	var reportType string
+	switch format {
+	case "excel":
+		reportType = ReportTypeUserDetailsExcel
+	case "pdf":
+		reportType = ReportTypeUserDetailsPDF
+	case "csv":
+		reportType = ReportTypeUserDetailsCSV
+	default:
+		c.JSON(http.StatusBadRequest, gin.H{"error": "unsupported format"})
+		return
+	}
+
+	bytes, fname, mime, err := h.service.ExportUserDetailsReport(c.Request.Context(), req, entityIDs, reportType, &ctx.UserID, ip)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
