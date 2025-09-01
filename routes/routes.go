@@ -291,8 +291,8 @@ entityRoutes.Use(middleware.RequireTempleAccess())
 }
 
 		// Special endpoints that bypass temple access check
-		protected.POST("/entities", middleware.RBACMiddleware("templeadmin", "superadmin"), entityHandler.CreateEntity)
-		protected.GET("/entities", middleware.RBACMiddleware("templeadmin", "superadmin"), entityHandler.GetAllEntities)
+		protected.POST("/entities", middleware.RBACMiddleware("templeadmin", "superadmin", "standarduser"), entityHandler.CreateEntity)
+		protected.GET("/entities", middleware.RBACMiddleware("templeadmin", "superadmin", "standarduser"), entityHandler.GetAllEntities)
 	}
 // ========== Event & RSVP ==========
 eventRepo := event.NewRepository(database.DB)

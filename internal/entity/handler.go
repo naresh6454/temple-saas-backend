@@ -21,44 +21,66 @@ func NewHandler(s *Service) *Handler {
 }
 
 // Temple Admin → Create Temple (Triggers approval request)
+// Temple Admin → Create Temple (Triggers approval request)
+// Temple Admin → Create Temple (Triggers approval request)
 func (h *Handler) CreateEntity(c *gin.Context) {
-	var input Entity
+    var input Entity
 
-	if err := c.ShouldBindJSON(&input); err != nil {
-		log.Printf("Bind Error: %v", err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid input", "details": err.Error()})
-		return
-	}
+    if err := c.ShouldBindJSON(&input); err != nil {
+        log.Printf("Bind Error: %v", err)
+        c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid input", "details": err.Error()})
+        return
+    }
 
-	// Validate required dropdown fields
-	if input.TempleType == "" || input.State == "" || input.EstablishedYear == nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Temple Type, State, and Established Year are required"})
-		return
-	}
+    // Validate required dropdown fields
+    if input.TempleType == "" || input.State == "" || input.EstablishedYear == nil {
+        c.JSON(http.StatusBadRequest, gin.H{"error": "Temple Type, State, and Established Year are required"})
+        return
+    }
 
-	// Get authenticated user
-	user, exists := c.Get("user")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
-		return
-	}
-	userID := user.(auth.User).ID
-	input.CreatedBy = userID
+    // Get authenticated user
+    user, exists := c.Get("user")
+    if !exists {
+        c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+        return
+    }
+    userObj := user.(auth.User)
+    userID := userObj.ID
+    
+    // Check permissions explicitly to allow standard users
+    if userObj.Role.RoleName != "superadmin" && 
+       userObj.Role.RoleName != "templeadmin" && 
+       userObj.Role.RoleName != "standarduser" {
+        c.JSON(http.StatusForbidden, gin.H{"error": "You don't have permission to create temples"})
+        return
+    }
+    
+    // For standard users, get the tenant ID from the X-Tenant-ID header
+    createdBy := userID
+    if userObj.Role.RoleName == "standarduser" {
+        tenantIDHeader := c.GetHeader("X-Tenant-ID")
+        if tenantIDHeader != "" {
+            // Convert the header value to uint
+            if tenantID, err := strconv.ParseUint(tenantIDHeader, 10, 64); err == nil {
+                createdBy = uint(tenantID)
+                log.Printf("Standard user %d creating temple as tenant %d", userID, createdBy)
+            }
+        }
+    }
+    
+    // Set the creator ID directly
+    input.CreatedBy = createdBy
+    
+    // 🆕 GET IP ADDRESS FOR AUDIT LOGGING
+    ip := middleware.GetIPFromContext(c)
 
-	if input.Status == "" {
-		input.Status = "pending"
-	}
+    if err := h.Service.CreateEntity(&input, userID, ip); err != nil {
+        log.Printf("Service Error: %v", err)
+        c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create entity", "details": err.Error()})
+        return
+    }
 
-	// 🆕 GET IP ADDRESS FOR AUDIT LOGGING
-	ip := middleware.GetIPFromContext(c)
-
-	if err := h.Service.CreateEntity(&input, userID, ip); err != nil {
-		log.Printf("Service Error: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create entity", "details": err.Error()})
-		return
-	}
-
-	c.JSON(http.StatusAccepted, gin.H{"message": "Temple registration request submitted successfully"})
+    c.JSON(http.StatusAccepted, gin.H{"message": "Temple registration request submitted successfully"})
 }
 
 // Super Admin → View all temples, Temple Admin → View only their created temples

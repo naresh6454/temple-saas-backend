@@ -49,6 +49,28 @@ func (r *Repository) GetEntityByID(id int) (Entity, error) {
 	return entity, err
 }
 
+// GetUserRole retrieves the role for a specific user
+func (r *Repository) GetUserRole(userID uint) (string, error) {
+    var roleName string
+    err := r.DB.Table("users").
+        Select("user_roles.role_name").
+        Joins("JOIN user_roles ON users.role_id = user_roles.id").
+        Where("users.id = ?", userID).
+        Scan(&roleName).Error
+    return roleName, err
+}
+
+// GetTenantIDForUser retrieves the tenant ID for a standard user
+func (r *Repository) GetTenantIDForUser(userID uint) (uint, error) {
+    var tenantID uint
+    err := r.DB.Table("tenant_user_assignments").
+        Select("tenant_id").
+        Where("user_id = ? AND status = ?", userID, "active").
+        Limit(1).
+        Scan(&tenantID).Error
+    return tenantID, err
+}
+
 // Update an existing temple entity
 func (r *Repository) UpdateEntity(e Entity) error {
 	e.UpdatedAt = time.Now()

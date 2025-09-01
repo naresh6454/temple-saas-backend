@@ -35,107 +35,111 @@ var (
 // ========== ENTITY CORE ==========
 
 // Temple Admin → Create Entity
+// Temple Admin → Create Entity
+// Temple Admin → Create Entity
+// Temple Admin → Create Entity
 func (s *Service) CreateEntity(e *Entity, userID uint, ip string) error {
-	// Validate required fields
-	if strings.TrimSpace(e.Name) == "" ||
-		e.MainDeity == nil || strings.TrimSpace(*e.MainDeity) == "" ||
-		strings.TrimSpace(e.Phone) == "" ||
-		strings.TrimSpace(e.Email) == "" {
-		
-		// 🔍 LOG FAILED TEMPLE CREATION ATTEMPT
-		auditDetails := map[string]interface{}{
-			"temple_name": strings.TrimSpace(e.Name),
-			"email":       strings.TrimSpace(e.Email),
-			"error":       "Missing required fields",
-		}
-		s.AuditService.LogAction(context.Background(), &userID, nil, "TEMPLE_CREATE_FAILED", auditDetails, ip, "failure")
-		
-		return ErrMissingFields
-	}
+    // Validate required fields
+    if strings.TrimSpace(e.Name) == "" ||
+        e.MainDeity == nil || strings.TrimSpace(*e.MainDeity) == "" ||
+        strings.TrimSpace(e.Phone) == "" ||
+        strings.TrimSpace(e.Email) == "" {
+        
+        // 🔍 LOG FAILED TEMPLE CREATION ATTEMPT
+        auditDetails := map[string]interface{}{
+            "temple_name": strings.TrimSpace(e.Name),
+            "email":       strings.TrimSpace(e.Email),
+            "error":       "Missing required fields",
+        }
+        s.AuditService.LogAction(context.Background(), &userID, nil, "TEMPLE_CREATE_FAILED", auditDetails, ip, "failure")
+        
+        return ErrMissingFields
+    }
 
-	now := time.Now()
+    now := time.Now()
 
-	// Set metadata
-	e.Status = "pending"
-	e.CreatedBy = userID
-	e.CreatedAt = now
-	e.UpdatedAt = now
+    // Set metadata
+    e.Status = "pending"
+    // DO NOT override the CreatedBy field here - it's already set by the handler
+    // The CreatedBy field should already be set correctly
+    e.CreatedAt = now
+    e.UpdatedAt = now
 
-	// Sanitize inputs
-	e.Name = strings.TrimSpace(e.Name)
-	e.Email = strings.TrimSpace(e.Email)
-	e.Phone = strings.TrimSpace(e.Phone)
-	e.TempleType = strings.TrimSpace(e.TempleType)
-	e.Description = strings.TrimSpace(e.Description)
-	e.StreetAddress = strings.TrimSpace(e.StreetAddress)
-	e.City = strings.TrimSpace(e.City)
-	e.State = strings.TrimSpace(e.State)
-	e.District = strings.TrimSpace(e.District)
-	e.Pincode = strings.TrimSpace(e.Pincode)
+    // Sanitize inputs
+    e.Name = strings.TrimSpace(e.Name)
+    e.Email = strings.TrimSpace(e.Email)
+    e.Phone = strings.TrimSpace(e.Phone)
+    e.TempleType = strings.TrimSpace(e.TempleType)
+    e.Description = strings.TrimSpace(e.Description)
+    e.StreetAddress = strings.TrimSpace(e.StreetAddress)
+    e.City = strings.TrimSpace(e.City)
+    e.State = strings.TrimSpace(e.State)
+    e.District = strings.TrimSpace(e.District)
+    e.Pincode = strings.TrimSpace(e.Pincode)
 
-	// Trim main deity if present
-	if e.MainDeity != nil {
-		trimmed := strings.TrimSpace(*e.MainDeity)
-		e.MainDeity = &trimmed
-	}
+    // Trim main deity if present
+    if e.MainDeity != nil {
+        trimmed := strings.TrimSpace(*e.MainDeity)
+        e.MainDeity = &trimmed
+    }
 
-	// Trim document URLs
-	e.RegistrationCertURL = strings.TrimSpace(e.RegistrationCertURL)
-	e.TrustDeedURL = strings.TrimSpace(e.TrustDeedURL)
-	e.PropertyDocsURL = strings.TrimSpace(e.PropertyDocsURL)
-	e.AdditionalDocsURLs = strings.TrimSpace(e.AdditionalDocsURLs)
+    // Trim document URLs
+    e.RegistrationCertURL = strings.TrimSpace(e.RegistrationCertURL)
+    e.TrustDeedURL = strings.TrimSpace(e.TrustDeedURL)
+    e.PropertyDocsURL = strings.TrimSpace(e.PropertyDocsURL)
+    e.AdditionalDocsURLs = strings.TrimSpace(e.AdditionalDocsURLs)
 
-	// Save entity
-	if err := s.Repo.CreateEntity(e); err != nil {
-		// 🔍 LOG FAILED TEMPLE CREATION (DB ERROR)
-		auditDetails := map[string]interface{}{
-			"temple_name": e.Name,
-			"email":       e.Email,
-			"error":       err.Error(),
-		}
-		s.AuditService.LogAction(context.Background(), &userID, nil, "TEMPLE_CREATE_FAILED", auditDetails, ip, "failure")
-		
-		return err
-	}
+    // Save entity
+    if err := s.Repo.CreateEntity(e); err != nil {
+        // 🔍 LOG FAILED TEMPLE CREATION (DB ERROR)
+        auditDetails := map[string]interface{}{
+            "temple_name": e.Name,
+            "email":       e.Email,
+            "error":       err.Error(),
+        }
+        s.AuditService.LogAction(context.Background(), &userID, nil, "TEMPLE_CREATE_FAILED", auditDetails, ip, "failure")
+        
+        return err
+    }
 
-	// Create approval request
-	req := &auth.ApprovalRequest{
-		UserID:      userID,
-		EntityID:    &e.ID,
-		RequestType: "temple_approval",
-		Status:      "pending",
-		CreatedAt:   now,
-		UpdatedAt:   now,
-	}
+    // Create approval request
+    req := &auth.ApprovalRequest{
+        UserID:      userID,
+        EntityID:    &e.ID,
+        RequestType: "temple_approval",
+        Status:      "pending",
+        CreatedAt:   now,
+        UpdatedAt:   now,
+    }
 
-	if err := s.Repo.CreateApprovalRequest(req); err != nil {
-		// 🔍 LOG FAILED APPROVAL REQUEST CREATION
-		auditDetails := map[string]interface{}{
-			"temple_name": e.Name,
-			"temple_id":   e.ID,
-			"email":       e.Email,
-			"error":       err.Error(),
-		}
-		s.AuditService.LogAction(context.Background(), &userID, &e.ID, "TEMPLE_APPROVAL_REQUEST_FAILED", auditDetails, ip, "failure")
-		
-		return err
-	}
+    if err := s.Repo.CreateApprovalRequest(req); err != nil {
+        // 🔍 LOG FAILED APPROVAL REQUEST CREATION
+        auditDetails := map[string]interface{}{
+            "temple_name": e.Name,
+            "temple_id":   e.ID,
+            "email":       e.Email,
+            "error":       err.Error(),
+        }
+        s.AuditService.LogAction(context.Background(), &userID, &e.ID, "TEMPLE_APPROVAL_REQUEST_FAILED", auditDetails, ip, "failure")
+        
+        return err
+    }
 
-	// 🔍 LOG SUCCESSFUL TEMPLE CREATION
-	auditDetails := map[string]interface{}{
-		"temple_name":   e.Name,
-		"temple_id":     e.ID,
-		"temple_type":   e.TempleType,
-		"email":         e.Email,
-		"phone":         e.Phone,
-		"city":          e.City,
-		"state":         e.State,
-		"main_deity":    e.MainDeity,
-		"status":        e.Status,
-	}
-	s.AuditService.LogAction(context.Background(), &userID, &e.ID, "TEMPLE_CREATED", auditDetails, ip, "success")
+    // 🔍 LOG SUCCESSFUL TEMPLE CREATION
+    auditDetails := map[string]interface{}{
+        "temple_name":   e.Name,
+        "temple_id":     e.ID,
+        "temple_type":   e.TempleType,
+        "email":         e.Email,
+        "phone":         e.Phone,
+        "city":          e.City,
+        "state":         e.State,
+        "main_deity":    e.MainDeity,
+        "status":        e.Status,
+    }
+    s.AuditService.LogAction(context.Background(), &userID, &e.ID, "TEMPLE_CREATED", auditDetails, ip, "success")
 
-	return nil
+    return nil
 }
 
 // Super Admin → Get all temples
