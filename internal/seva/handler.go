@@ -37,6 +37,19 @@ type CreateSevaRequest struct {
 	MaxBookingsPerDay int       `json:"max_bookings_per_day"`
 }
 
+type UpdateSevaRequest struct {
+	Name              string    `json:"name"`
+	SevaType          string    `json:"seva_type"`
+	Description       string    `json:"description"`
+	Price             float64   `json:"price"`
+	Date              string    `json:"date"`
+	StartTime         string    `json:"start_time"`
+	EndTime           string    `json:"end_time"`
+	Duration          int       `json:"duration"`
+	MaxBookingsPerDay int       `json:"max_bookings_per_day"`
+	IsActive          *bool     `json:"is_active"`
+}
+
 type BookSevaRequest struct {
 	SevaID uint `json:"seva_id" binding:"required"`
 }
@@ -82,6 +95,199 @@ func (h *Handler) CreateSeva(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusCreated, gin.H{"message": "Seva created successfully", "seva": seva})
+}
+
+// 🆕 List all sevas for temple admin with filters and pagination
+func (h *Handler) ListEntitySevas(c *gin.Context) {
+	// Use access context for entity access
+	accessContext := c.MustGet("access_context").(middleware.AccessContext)
+	entityID := accessContext.GetAccessibleEntityID()
+	if entityID == nil {
+		c.JSON(http.StatusForbidden, gin.H{"error": "No accessible entity"})
+		return
+	}
+
+	// Parse query parameters
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "10"))
+	offset := (page - 1) * limit
+
+	sevaType := c.Query("seva_type")
+	search := c.Query("search")
+	status := c.Query("status")
+	isActive := c.Query("is_active")
+
+	sevas, total, err := h.service.GetSevasWithFilters(
+		c,
+		*entityID,
+		sevaType,
+		search,
+		status,
+		isActive,
+		limit,
+		offset,
+	)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch sevas: " + err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"sevas": sevas,
+		"total": total,
+		"page":  page,
+		"limit": limit,
+	})
+}
+
+// 🆕 Get seva by ID for temple admin
+func (h *Handler) GetSevaByID(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid seva ID"})
+		return
+	}
+
+	// Use access context for entity verification
+	accessContext := c.MustGet("access_context").(middleware.AccessContext)
+	entityID := accessContext.GetAccessibleEntityID()
+	if entityID == nil {
+		c.JSON(http.StatusForbidden, gin.H{"error": "No accessible entity"})
+		return
+	}
+
+	seva, err := h.service.GetSevaByID(c, uint(id))
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Seva not found"})
+		return
+	}
+
+	// Verify seva belongs to accessible entity
+	if seva.EntityID != *entityID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied to this seva"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"seva": seva})
+}
+
+// 🆕 Update seva
+func (h *Handler) UpdateSeva(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid seva ID"})
+		return
+	}
+
+	var input UpdateSevaRequest
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid input: " + err.Error()})
+		return
+	}
+
+	// Use access context for permissions
+	accessContext := c.MustGet("access_context").(middleware.AccessContext)
+	entityID := accessContext.GetAccessibleEntityID()
+	if entityID == nil {
+		c.JSON(http.StatusForbidden, gin.H{"error": "No accessible entity"})
+		return
+	}
+
+	// Extract IP address
+	ip := middleware.GetIPFromContext(c)
+
+	// Get existing seva to verify ownership and preserve data
+	existingSeva, err := h.service.GetSevaByID(c, uint(id))
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Seva not found"})
+		return
+	}
+
+	// Verify seva belongs to accessible entity
+	if existingSeva.EntityID != *entityID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied to this seva"})
+		return
+	}
+
+	// Update fields only if provided
+	updatedSeva := *existingSeva
+	if input.Name != "" {
+		updatedSeva.Name = input.Name
+	}
+	if input.SevaType != "" {
+		updatedSeva.SevaType = input.SevaType
+	}
+	if input.Description != "" {
+		updatedSeva.Description = input.Description
+	}
+	if input.Price > 0 {
+		updatedSeva.Price = input.Price
+	}
+	if input.Date != "" {
+		updatedSeva.Date = input.Date
+	}
+	if input.StartTime != "" {
+		updatedSeva.StartTime = input.StartTime
+	}
+	if input.EndTime != "" {
+		updatedSeva.EndTime = input.EndTime
+	}
+	if input.Duration > 0 {
+		updatedSeva.Duration = input.Duration
+	}
+	if input.MaxBookingsPerDay > 0 {
+		updatedSeva.MaxBookingsPerDay = input.MaxBookingsPerDay
+	}
+	if input.IsActive != nil {
+		updatedSeva.IsActive = *input.IsActive
+	}
+
+	if err := h.service.UpdateSeva(c, &updatedSeva, accessContext, ip); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update seva: " + err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Seva updated successfully", "seva": updatedSeva})
+}
+
+// 🆕 Delete seva (soft delete by setting is_active = false)
+func (h *Handler) DeleteSeva(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid seva ID"})
+		return
+	}
+
+	// Use access context for permissions
+	accessContext := c.MustGet("access_context").(middleware.AccessContext)
+	entityID := accessContext.GetAccessibleEntityID()
+	if entityID == nil {
+		c.JSON(http.StatusForbidden, gin.H{"error": "No accessible entity"})
+		return
+	}
+
+	// Extract IP address
+	ip := middleware.GetIPFromContext(c)
+
+	// Get existing seva to verify ownership
+	existingSeva, err := h.service.GetSevaByID(c, uint(id))
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Seva not found"})
+		return
+	}
+
+	// Verify seva belongs to accessible entity
+	if existingSeva.EntityID != *entityID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied to this seva"})
+		return
+	}
+
+	if err := h.service.DeleteSeva(c, uint(id), accessContext, ip); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete seva: " + err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Seva deleted successfully"})
 }
 
 func (h *Handler) GetSevas(c *gin.Context) {

@@ -2,7 +2,7 @@ package reports
 
 import (
 	"time"
-
+	"fmt"
 	"gorm.io/gorm"
 )
 
@@ -33,13 +33,39 @@ func NewRepository(db *gorm.DB) ReportRepository {
 }
 
 func (r *repository) GetEntitiesByTenant(userID uint) ([]uint, error) {
-	var ids []uint
-	// Table "entities" has created_by which stores templeadmin user ID
-	err := r.db.Table("entities").
-		Select("id").
-		Where("created_by = ?", userID).
-		Scan(&ids).Error
-	return ids, err
+    var ids []uint
+    
+    // First check if this is a standard user with an assigned tenant
+    var assignedTenantID uint
+    err := r.db.Table("tenant_user_assignments").
+        Select("tenant_id").
+        Where("user_id = ? AND status = 'active'", userID).
+        Limit(1).
+        Scan(&assignedTenantID).Error
+    
+    if err == nil && assignedTenantID > 0 {
+        // Log for debugging
+        fmt.Printf("User %d is assigned to tenant %d\n", userID, assignedTenantID)
+        
+        // Found an assigned tenant, get ALL entities for that tenant
+        err = r.db.Table("entities").
+            Select("id").
+            Where("created_by = ?", assignedTenantID).
+            Scan(&ids).Error
+        
+        if err == nil {
+            fmt.Printf("Found %d entities for tenant %d\n", len(ids), assignedTenantID)
+            return ids, nil
+        }
+    }
+    
+    // If no assignment or no entities found by assignment, try direct creation
+    err = r.db.Table("entities").
+        Select("id").
+        Where("created_by = ?", userID).
+        Scan(&ids).Error
+    
+    return ids, err
 }
 
 func (r *repository) GetEvents(entityIDs []uint, start, end time.Time) ([]EventReportRow, error) {

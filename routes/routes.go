@@ -196,40 +196,47 @@ func Setup(r *gin.Engine, cfg *config.Config) {
 		middleware.RBACMiddleware("superadmin", "standarduser", "monitoringuser"), 
 		superadminHandler.GetTenantsForSelection)
 	
-
-// ========== Seva ==========
+// ========== Seva Routes ==========
 sevaRepo := seva.NewRepository(database.DB)
 sevaService := seva.NewService(sevaRepo, auditSvc)    // ✅ INJECT AUDIT SERVICE
 sevaHandler := seva.NewHandler(sevaService, auditSvc) // ✅ INJECT AUDIT SERVICE
 
 sevaRoutes := protected.Group("/sevas")
-sevaRoutes.GET("/booking-counts", sevaHandler.GetBookingCounts)
 
+// 📊 Common route accessible to both temple admin and devotees
+sevaRoutes.GET("/booking-counts", sevaHandler.GetBookingCounts)
 
 // 🔐 Temple Admin Routes (templeadmin, standarduser, monitoringuser)
 templeSevaRoutes := sevaRoutes.Group("")
 templeSevaRoutes.Use(middleware.RequireTempleAccess())
 {
-	// Write operations - only templeadmin and standarduser can access
-	writeRoutes := templeSevaRoutes.Group("")
-	writeRoutes.Use(middleware.RequireWriteAccess())
-	{
-		writeRoutes.POST("/", sevaHandler.CreateSeva)
-		writeRoutes.PATCH("/bookings/:id/status", sevaHandler.UpdateBookingStatus)
-	}
-	
-	// Read operations - all three roles can access
-	templeSevaRoutes.GET("/entity-bookings", sevaHandler.GetEntityBookings)
-	templeSevaRoutes.GET("/bookings/:id", sevaHandler.GetBookingByID)
+    // Write operations - only templeadmin and standarduser can access
+    writeRoutes := templeSevaRoutes.Group("")
+    writeRoutes.Use(middleware.RequireWriteAccess())
+    {
+        // Seva CRUD operations
+        writeRoutes.POST("/", sevaHandler.CreateSeva)                    // ✅ Create seva
+        writeRoutes.PUT("/:id", sevaHandler.UpdateSeva)                  // 🆕 Update seva
+        writeRoutes.DELETE("/:id", sevaHandler.DeleteSeva)               // 🆕 Delete seva (soft delete)
+        
+        // Booking status management
+        writeRoutes.PATCH("/bookings/:id/status", sevaHandler.UpdateBookingStatus)
+    }
+   
+    // Read operations - all three roles (templeadmin, standarduser, monitoringuser) can access
+    templeSevaRoutes.GET("/entity-sevas", sevaHandler.ListEntitySevas)   // 🆕 List sevas with filters for temple admin
+    templeSevaRoutes.GET("/:id", sevaHandler.GetSevaByID)                // 🆕 Get seva by ID for temple admin
+    templeSevaRoutes.GET("/entity-bookings", sevaHandler.GetEntityBookings)
+    templeSevaRoutes.GET("/bookings/:id", sevaHandler.GetBookingByID)
 }
 
 // 🔐 Devotee Only Routes (keep existing middleware)
 devoteeSevaRoutes := sevaRoutes.Group("")
 devoteeSevaRoutes.Use(middleware.RBACMiddleware("devotee"))
 {
-	devoteeSevaRoutes.POST("/bookings", sevaHandler.BookSeva)
-	devoteeSevaRoutes.GET("/my-bookings", sevaHandler.GetMyBookings)
-	devoteeSevaRoutes.GET("/", sevaHandler.GetSevas) // Devotee view: Paginated & Filterable Sevas
+    devoteeSevaRoutes.POST("/bookings", sevaHandler.BookSeva)
+    devoteeSevaRoutes.GET("/my-bookings", sevaHandler.GetMyBookings)
+    devoteeSevaRoutes.GET("/", sevaHandler.GetSevas)                     // Devotee view: Paginated & Filterable Sevas
 }
 
 // ========== Entity ==========

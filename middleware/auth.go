@@ -3,6 +3,7 @@ package middleware
 import (
 	"net/http"
 	"strconv"
+	"fmt"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -152,9 +153,17 @@ func ResolveAccessContextWithDevotee(c *gin.Context, user auth.User, assignedTen
 		accessContext.PermissionType = "full"
 		accessContext.DirectEntityID = user.EntityID
 		
-	case RoleStandardUser:
-		accessContext.PermissionType = "full"
-		accessContext.AssignedEntityID = assignedTenantID
+	// Modified part in ResolveAccessContextWithDevotee function
+case RoleStandardUser:
+    accessContext.PermissionType = "full"
+    // Ensure we set the assigned tenant ID for entity access
+    if assignedTenantID != nil {
+        accessContext.AssignedEntityID = assignedTenantID
+        // Log assigned tenant ID for debugging
+        fmt.Printf("Standard user assigned to tenant ID: %d\n", *assignedTenantID)
+    } else {
+        fmt.Printf("WARNING: Standard user has no assigned tenant ID\n")
+    }
 		
 	case RoleMonitoringUser:
 		accessContext.PermissionType = "readonly"

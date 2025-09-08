@@ -382,80 +382,105 @@ func (h *Handler) GetSuperAdminTenantActivities(c *gin.Context) {
 }
 
 func (h *Handler) GetTempleRegisteredReport(c *gin.Context) {
-	// Get access context from middleware
-	accessContext, exists := c.Get("access_context")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "access context missing"})
-		return
-	}
-	ctx := accessContext.(middleware.AccessContext)
+    // Get access context from middleware
+    accessContext, exists := c.Get("access_context")
+    if !exists {
+        c.JSON(http.StatusUnauthorized, gin.H{"error": "access context missing"})
+        return
+    }
+    ctx := accessContext.(middleware.AccessContext)
 
-	// Get IP address from context (set by AuditMiddleware)
-	ip := middleware.GetIPFromContext(c)
+    // Get IP address from context (set by AuditMiddleware)
+    ip := middleware.GetIPFromContext(c)
 
-	entityParam := c.Param("id") // "all" or specific entity id
+    entityParam := c.Param("id") // "all" or specific entity id
 
-	dateRange := c.Query("date_range")
-	if dateRange == "" {
-		dateRange = DateRangeWeekly
-	}
-	startDateStr := c.Query("start_date")
-	endDateStr := c.Query("end_date")
-	status := c.Query("status") // approve|rejected|pending
-	format := c.Query("format")
+    dateRange := c.Query("date_range")
+    if dateRange == "" {
+        dateRange = DateRangeWeekly
+    }
+    startDateStr := c.Query("start_date")
+    endDateStr := c.Query("end_date")
+    status := c.Query("status") // approve|rejected|pending
+    format := c.Query("format")
 
-	start, end, err := GetDateRange(dateRange, startDateStr, endDateStr)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
+    start, end, err := GetDateRange(dateRange, startDateStr, endDateStr)
+    if err != nil {
+        c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+        return
+    }
 
-	// Resolve entity IDs based on access context
-	var entityIDs []string
-	if strings.ToLower(entityParam) == "all" {
-		if ctx.RoleName == "templeadmin" {
-			ids, err := h.repo.GetEntitiesByTenant(ctx.UserID)
-			if err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch user entities"})
-				return
-			}
-			if len(ids) == 0 {
-				c.JSON(http.StatusOK, gin.H{"data": []TempleRegisteredReportRow{}})
-				return
-			}
-			for _, id := range ids {
-				entityIDs = append(entityIDs, fmt.Sprint(id))
-			}
-		} else {
-			accessibleEntityID := ctx.GetAccessibleEntityID()
-			if accessibleEntityID == nil {
-				c.JSON(http.StatusForbidden, gin.H{"error": "no accessible entity"})
-				return
-			}
-			entityIDs = append(entityIDs, fmt.Sprint(*accessibleEntityID))
-		}
-	} else {
-		eid, err := strconv.ParseUint(entityParam, 10, 64)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid entity_id path param"})
-			return
-		}
-		
-		if !h.canAccessEntity(ctx, uint(eid)) {
-			c.JSON(http.StatusForbidden, gin.H{"error": "not authorized for this entity"})
-			return
-		}
-		entityIDs = append(entityIDs, fmt.Sprint(eid))
-	}
+    // Resolve entity IDs based on access context
+    var entityIDs []string
+    
+    // IMPORTANT: For standard users, get all entities from their assigned tenant
+    if strings.ToLower(entityParam) == "all" {
+        if ctx.RoleName == "templeadmin" {
+            ids, err := h.repo.GetEntitiesByTenant(ctx.UserID)
+            if err != nil {
+                c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch user entities"})
+                return
+            }
+            if len(ids) == 0 {
+                c.JSON(http.StatusOK, gin.H{"data": []TempleRegisteredReportRow{}})
+                return
+            }
+            for _, id := range ids {
+                entityIDs = append(entityIDs, fmt.Sprint(id))
+            }
+        } else if ctx.RoleName == "standarduser" || ctx.RoleName == "monitoringuser" {
+            // For standard/monitoring users, get all entities from their assigned tenant
+            var assignedTenantID uint
+            if ctx.AssignedEntityID != nil {
+                assignedTenantID = *ctx.AssignedEntityID
+                
+                // Get all entities for the assigned tenant
+                ids, err := h.repo.GetEntitiesByTenant(assignedTenantID)
+                if err != nil {
+                    c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch tenant entities"})
+                    return
+                }
+                if len(ids) == 0 {
+                    c.JSON(http.StatusOK, gin.H{"data": []TempleRegisteredReportRow{}})
+                    return
+                }
+                for _, id := range ids {
+                    entityIDs = append(entityIDs, fmt.Sprint(id))
+                }
+            } else {
+                c.JSON(http.StatusForbidden, gin.H{"error": "no assigned tenant"})
+                return
+            }
+        } else {
+            accessibleEntityID := ctx.GetAccessibleEntityID()
+            if accessibleEntityID == nil {
+                c.JSON(http.StatusForbidden, gin.H{"error": "no accessible entity"})
+                return
+            }
+            entityIDs = append(entityIDs, fmt.Sprint(*accessibleEntityID))
+        }
+    } else {
+        eid, err := strconv.ParseUint(entityParam, 10, 64)
+        if err != nil {
+            c.JSON(http.StatusBadRequest, gin.H{"error": "invalid entity_id path param"})
+            return
+        }
+        
+        if !h.canAccessEntity(ctx, uint(eid)) {
+            c.JSON(http.StatusForbidden, gin.H{"error": "not authorized for this entity"})
+            return
+        }
+        entityIDs = append(entityIDs, fmt.Sprint(eid))
+    }
 
-	req := TempleRegisteredReportRequest{
-		DateRange: dateRange,
-		StartDate: start,
-		EndDate:   end,
-		Status:    status,
-		Format:    format,
-		EntityID:  entityParam,
-	}
+    req := TempleRegisteredReportRequest{
+        DateRange: dateRange,
+        StartDate: start,
+        EndDate:   end,
+        Status:    status,
+        Format:    format,
+        EntityID:  entityParam,
+    }
 	
 	// The 'format' query parameter determines the report type for the exporter.
 	var reportType string
